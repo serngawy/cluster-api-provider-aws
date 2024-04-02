@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+    Generator: "redhat"
+Description: "VPC infra for ROSA HCP"
+Parameters:
+    ClusterName:
+        Type: "String"
+        Default: "rosa-hcp"
+    AwsRegion:
+        Type: "String"
+        Default: "us-west-2"
+    AwsAvailabilityZone1:
+        Type: "String"
+        Default: "us-west-2a"
+    AwsAvailabilityZone2:
+        Type: "String"
+        Default: "us-west-2b"
+Resources:
+    EC2VPC:
+        Type: "AWS::EC2::VPC"
+        Properties:
+            CidrBlock: "10.0.0.0/16"
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+            InstanceTenancy: "default"
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Ref ClusterName
+
+    EC2Subnet:
+        Type: "AWS::EC2::Subnet"
+        Properties:
+            AvailabilityZone: !Ref AwsAvailabilityZone1 #!Sub "${AWS::Region}a" 
+            CidrBlock: "10.0.102.0/24"
+            VpcId: !Ref EC2VPC
+            MapPublicIpOnLaunch: false
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "public"]]
+
+    EC2Subnet2:
+        Type: "AWS::EC2::Subnet"
+        Properties:
+            AvailabilityZone: !GetAtt EC2Subnet.AvailabilityZone
+            CidrBlock: "10.0.2.0/24"
+            VpcId: !Ref EC2VPC
+            MapPublicIpOnLaunch: false
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "private"]]
+
+    EC2Subnet3:
+        Type: "AWS::EC2::Subnet"
+        Properties:
+            AvailabilityZone:  !Ref AwsAvailabilityZone2 #!Sub "${AWS::Region}b"
+            CidrBlock: "10.0.1.0/24"
+            VpcId: !Ref EC2VPC
+            MapPublicIpOnLaunch: false
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "private"]]
+
+    EC2Subnet4:
+        Type: "AWS::EC2::Subnet"
+        Properties:
+            AvailabilityZone:  !GetAtt EC2Subnet3.AvailabilityZone
+            CidrBlock: "10.0.101.0/24"
+            VpcId: !Ref EC2VPC
+            MapPublicIpOnLaunch: false
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "public"]]
+
+    EC2InternetGateway:
+        Type: "AWS::EC2::InternetGateway"
+        Properties:
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Ref ClusterName
+
+    EC2VPCDHCPOptionsAssociation:
+        Type: "AWS::EC2::VPCDHCPOptionsAssociation"
+        Properties:
+            DhcpOptionsId: !Ref EC2DHCPOptions
+            VpcId: !Ref EC2VPC
+
+    EC2RouteTable:
+        Type: "AWS::EC2::RouteTable"
+        Properties:
+            VpcId: !Ref EC2VPC
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "private"]]
+
+    EC2RouteTable2:
+        Type: "AWS::EC2::RouteTable"
+        Properties:
+            VpcId: !Ref EC2VPC
+            Tags: 
+              - 
+                Key: "Name"
+                Value: "rosa-hcp-default"
+
+    EC2RouteTable3:
+        Type: "AWS::EC2::RouteTable"
+        Properties:
+            VpcId: !Ref EC2VPC
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "public"]]
+
+    EC2NatGateway:
+        Type: "AWS::EC2::NatGateway"
+        Properties:
+            SubnetId: !Ref EC2Subnet4
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Ref ClusterName
+            AllocationId: !GetAtt EC2EIP.AllocationId
+
+    EC2VPCGatewayAttachment:
+        Type: "AWS::EC2::VPCGatewayAttachment"
+        Properties:
+            InternetGatewayId: !Ref EC2InternetGateway
+            VpcId: !Ref EC2VPC
+
+    EC2NetworkInterface:
+        Type: "AWS::EC2::NetworkInterface"
+        Properties:
+            Description: !Sub "Interface for NAT Gateway ${EC2NatGateway}"
+            PrivateIpAddresses: 
+              - 
+                PrivateIpAddress: "10.0.101.101"
+                Primary: true
+            SubnetId: !Ref EC2Subnet4
+            SourceDestCheck: false
+
+    EC2EIP:
+        Type: "AWS::EC2::EIP"
+        Properties:
+            Domain: "vpc"
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Ref ClusterName
+
+    # EC2EIPAssociation:
+    #     Type: "AWS::EC2::EIPAssociation"
+    #     Properties:
+    #         # AllocationId: !GetAtt EC2EIP.AllocationId
+    #         NetworkInterfaceId: !Ref EC2NetworkInterface #"eni-0fd222b1f54c547be"
+    #         PrivateIpAddress: "10.0.101.101"
+
+    EC2Route:
+        Type: "AWS::EC2::Route"
+        Properties:
+            DestinationCidrBlock: "0.0.0.0/0"
+            NatGatewayId: !Ref EC2NatGateway
+            RouteTableId: !Ref EC2RouteTable
+
+    EC2SubnetRouteTableAssociation:
+        Type: "AWS::EC2::SubnetRouteTableAssociation"
+        Properties:
+            RouteTableId: !Ref EC2RouteTable
+            SubnetId: !Ref EC2Subnet2
+
+    EC2SubnetRouteTableAssociation2:
+        Type: "AWS::EC2::SubnetRouteTableAssociation"
+        Properties:
+            RouteTableId: !Ref EC2RouteTable
+            SubnetId: !Ref EC2Subnet3
+
+    EC2Route2:
+        Type: "AWS::EC2::Route"
+        Properties:
+            DestinationCidrBlock: "0.0.0.0/0"
+            GatewayId: !Ref EC2InternetGateway
+            RouteTableId: !Ref EC2RouteTable3
+
+    EC2SubnetRouteTableAssociation3:
+        Type: "AWS::EC2::SubnetRouteTableAssociation"
+        Properties:
+            RouteTableId: !Ref EC2RouteTable3
+            SubnetId: !Ref EC2Subnet
+
+    EC2SubnetRouteTableAssociation4:
+        Type: "AWS::EC2::SubnetRouteTableAssociation"
+        Properties:
+            RouteTableId: !Ref EC2RouteTable3
+            SubnetId: !Ref EC2Subnet4
+
+    EC2DHCPOptions:
+        Type: "AWS::EC2::DHCPOptions"
+        Properties:
+            DomainName: !Sub "${AWS::Region}.compute.internal"
+Outputs:
+    VPC:
+        Description: Reference to the created VPC
+        Value: !Ref EC2VPC
+
+    PublicSubnets1:
+        Description: Reference to the public subnets at avaliabilty zone AwsAvailabilityZone1
+        Value: !Ref EC2Subnet
+
+    PrivateSubnets1:
+        Description: Reference to the private subnets at avaliabilty zone AwsAvailabilityZone1
+        Value: !Ref EC2Subnet2
+
+    PublicSubnets2:
+        Description: Reference to the public subnets at avaliabilty zone AwsAvailabilityZone2
+        Value: !Ref EC2Subnet4
+
+    PrivateSubnets2:
+        Description: Reference to the private subnets at avaliabilty zone AwsAvailabilityZone2
+        Value: !Ref EC2Subnet3

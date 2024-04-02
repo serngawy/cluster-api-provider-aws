@@ -1,0 +1,76 @@
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachinePool
+metadata:
+  annotations:
+    cluster.x-k8s.io/replicas-managed-by: rosa
+  name: "workers-1"
+  namespace: "ns-rosa-hcp"
+spec:
+  clusterName: "rosa-hcp"
+  replicas: 1
+  template:
+    spec:
+      clusterName: "rosa-hcp"
+      bootstrap:
+        dataSecretName: ""
+      infrastructureRef:
+        name: "workers-1"
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+        kind: ROSAMachinePool
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ROSAMachinePool
+metadata:
+  name: "workers-1"
+  namespace: "ns-rosa-hcp"
+spec:
+  nodePoolName: "workers-1"
+  version: "4.15.0"
+  instanceType: "m5.xlarge"
+  labels:
+    profile: "rosa-worker"
+  subnet: "subnet-0439a9481971304d2"
+  autoRepair: true
+  nodeDrainGracePeriod: 1m
+  autoscaling:
+    maxReplicas: 2
+    minReplicas: 1
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachinePool
+metadata:
+  annotations:
+    cluster.x-k8s.io/replicas-managed-by: rosa
+  name: "workers-0"
+  namespace: "ns-rosa-hcp"
+spec:
+  clusterName: "rosa-hcp"
+  replicas: 1
+  template:
+    spec:
+      clusterName: "rosa-hcp"
+      bootstrap:
+        dataSecretName: ""
+      infrastructureRef:
+        name: "workers-0"
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+        kind: ROSAMachinePool
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ROSAMachinePool
+metadata:
+  name: "workers-0"
+  namespace: "ns-rosa-hcp"
+spec:
+  nodePoolName: "workers-0"
+  version: "4.15.0"
+  instanceType: "m5.xlarge"
+  labels:
+    profile: "rosa-worker"
+  subnet: "subnet-0326e816eaeb8ca8c"
+  autoRepair: true
+  nodeDrainGracePeriod: 1m
+  autoscaling:
+    maxReplicas: 2
+    minReplicas: 1

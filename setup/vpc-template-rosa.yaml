@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+    Generator: "redhat"
+Description: "VPC infra for ROSA HCP"
+Parameters:
+    ClusterName:
+        Type: "String"
+        Default: "rosa-hcp"
+    AwsRegion:
+        Type: "String"
+        Default: "us-west-2"
+    AwsAvailabilityZone:
+        Type: "String"
+        Default: "us-west-2b"
+
+Resources:
+    EC2VPC:
+        Type: "AWS::EC2::VPC"
+        Properties:
+            CidrBlock: "10.0.0.0/16"
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+            InstanceTenancy: "default"
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Ref ClusterName
+
+    EC2SubnetPriv:
+        Type: "AWS::EC2::Subnet"
+        Properties:
+            AvailabilityZone: !Ref AwsAvailabilityZone
+            CidrBlock: "10.0.0.0/24"
+            VpcId: !Ref EC2VPC
+            MapPublicIpOnLaunch: false
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "private"]]
+
+    EC2SubnetPub:
+        Type: "AWS::EC2::Subnet"
+        Properties:
+            AvailabilityZone: !Ref AwsAvailabilityZone
+            CidrBlock: "10.0.1.0/24"
+            VpcId: !Ref EC2VPC
+            MapPublicIpOnLaunch: false
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "public"]]
+
+    EC2InternetGateway:
+        Type: "AWS::EC2::InternetGateway"
+        Properties:
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Ref ClusterName
+
+    EC2VPCGatewayAttachment:
+        Type: "AWS::EC2::VPCGatewayAttachment"
+        Properties:
+            InternetGatewayId: !Ref EC2InternetGateway
+            VpcId: !Ref EC2VPC
+
+    EC2RouteTablePub:
+        Type: "AWS::EC2::RouteTable"
+        Properties:
+            VpcId: !Ref EC2VPC
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Ref ClusterName
+
+    EC2SubnetRouteTableAssociationPub:
+        Type: "AWS::EC2::SubnetRouteTableAssociation"
+        Properties:
+            RouteTableId: !Ref EC2RouteTablePub
+            SubnetId: !Ref EC2SubnetPub
+
+    EC2RoutePub:
+        Type: "AWS::EC2::Route"
+        Properties:
+            DestinationCidrBlock: "0.0.0.0/0"
+            GatewayId: !Ref EC2InternetGateway
+            RouteTableId: !Ref EC2RouteTablePub
+
+    EC2EIP:
+        Type: "AWS::EC2::EIP"
+        Properties:
+            Domain: "vpc"
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "private"]]
+
+    EC2NatGateway:
+        Type: "AWS::EC2::NatGateway"
+        Properties:
+            SubnetId: !Ref EC2SubnetPub
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Ref ClusterName
+            AllocationId: !GetAtt EC2EIP.AllocationId
+
+    EC2RouteTablePriv:
+        Type: "AWS::EC2::RouteTable"
+        Properties:
+            VpcId: !Ref EC2VPC
+            Tags: 
+              - 
+                Key: "Name"
+                Value: !Join ["-", [!Ref ClusterName,  "private"]]
+
+    EC2SubnetRouteTableAssociationPriv:
+        Type: "AWS::EC2::SubnetRouteTableAssociation"
+        Properties:
+            RouteTableId: !Ref EC2RouteTablePriv
+            SubnetId: !Ref EC2SubnetPriv
+
+    EC2RoutePriv:
+        Type: "AWS::EC2::Route"
+        Properties:
+            DestinationCidrBlock: "0.0.0.0/0"
+            GatewayId: !Ref EC2NatGateway
+            RouteTableId: !Ref EC2RouteTablePriv
+
+    EC2DHCPOptions:
+        Type: "AWS::EC2::DHCPOptions"
+        Properties:
+            DomainName: !Join [".",[!Ref AwsRegion,"compute.internal"]] 
+
+    EC2VPCDHCPOptionsAssociation:
+        Type: "AWS::EC2::VPCDHCPOptionsAssociation"
+        Properties:
+            DhcpOptionsId: !Ref EC2DHCPOptions
+            VpcId: !Ref EC2VPC
+
+    EC2NetworkInterface:
+        Type: "AWS::EC2::NetworkInterface"
+        Properties:
+            Description: !Sub "Interface for NAT Gateway ${EC2NatGateway}"
+            PrivateIpAddresses: 
+              - 
+                PrivateIpAddress: "10.0.1.27"
+                Primary: true
+            SubnetId: !Ref EC2SubnetPub
+            SourceDestCheck: false
+
+    # EC2EIPAssociation:
+    #     Type: "AWS::EC2::EIPAssociation"
+    #     Properties:
+    #         AllocationId: !GetAtt EC2EIP.AllocationId
+    #         NetworkInterfaceId: !Ref EC2NetworkInterface
+    #         PrivateIpAddress: "10.0.1.27"
+Outputs:
+    VPC:
+        Description: Reference to the created VPC
+        Value: !Ref EC2VPC
+
+    PrivateSubnets:
+        Description: Reference to the created private subnets
+        Value: !Ref EC2SubnetPriv
+
+    PublicSubnets:
+        Description: Reference to the created public subnets
+        Value: !Ref EC2SubnetPub

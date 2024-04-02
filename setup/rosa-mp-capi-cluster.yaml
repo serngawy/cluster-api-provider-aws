@@ -1,0 +1,149 @@
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: "rosa-hcp"
+  namespace: "ns-rosa-hcp"
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks: ["192.168.0.0/16"]
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+    kind: ROSACluster
+    name: "rosa-hcp"
+  controlPlaneRef:
+    apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+    kind: ROSAControlPlane
+    name: "rosa-cp"
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ROSACluster
+metadata:
+  name: "rosa-hcp"
+  namespace: "ns-rosa-hcp"
+spec: {}
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: ROSAControlPlane
+metadata:
+  name: "rosa-cp"
+  namespace: "ns-rosa-hcp"
+spec:
+  credentialsSecretRef:
+    name: rosa-creds-secret
+  rosaClusterName: rosa-hosted-control-plan-as-long-name-0
+  domainPrefix: mydomain
+  version: "4.15.0"
+  region: "us-west-2"
+  rolesRef:
+    ingressARN: "arn:aws:iam::471112697682:role/melserng-openshift-ingress-operator-cloud-credentials"
+    imageRegistryARN: "arn:aws:iam::471112697682:role/melserng-openshift-image-registry-installer-cloud-credentials"
+    storageARN: "arn:aws:iam::471112697682:role/melserng-openshift-cluster-csi-drivers-ebs-cloud-credentials"
+    networkARN: "arn:aws:iam::471112697682:role/melserng-openshift-cloud-network-config-controller-cloud-credent"
+    kubeCloudControllerARN: "arn:aws:iam::471112697682:role/melserng-kube-system-kube-controller-manager"
+    nodePoolManagementARN: "arn:aws:iam::471112697682:role/melserng-kube-system-capa-controller-manager"
+    controlPlaneOperatorARN: "arn:aws:iam::471112697682:role/melserng-kube-system-control-plane-operator"
+    kmsProviderARN: "arn:aws:iam::471112697682:role/melserng-kube-system-kms-provider"
+  oidcID: "2a0v5hcmdvfr0e20is7nsaflaemuoo81"
+  subnets:
+    - subnet-0439a9481971304d2 #priv1
+    - subnet-028ec3298c315f148 #pub1
+    - subnet-0326e816eaeb8ca8c #priv2
+    - subnet-01c5a2ad8bbd2d89b #pub3
+  availabilityZones:
+    - "us-west-2b"
+    - "us-west-2a"
+  installerRoleARN: "arn:aws:iam::471112697682:role/melserng-HCP-ROSA-Installer-Role"
+  supportRoleARN: "arn:aws:iam::471112697682:role/melserng-HCP-ROSA-Support-Role"
+  workerRoleARN: "arn:aws:iam::471112697682:role/melserng-HCP-ROSA-Worker-Role"
+  network:
+    machineCIDR: "10.0.0.0/16"
+    podCIDR: "10.128.0.0/14"
+    serviceCIDR: "172.30.0.0/16"
+    #networkType: Other
+  defaultMachinePoolSpec:
+    instanceType: "m5.xlarge"
+    autoscaling:
+      maxReplicas: 4
+      minReplicas: 2
+  additionalTags:
+    env: "demo"
+    profile: "hcp"
+  #provisionShardID: "88d699d7-7821-11ee-8b13-0a580a82022a"
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachinePool
+metadata:
+  name: "rosa-hcp-pool-0"
+  namespace: "ns-rosa-hcp"
+spec:
+  clusterName: "rosa-hcp"
+  replicas: 1
+  template:
+    spec:
+      clusterName: "rosa-hcp"
+      bootstrap:
+        dataSecretName: ""
+      infrastructureRef:
+        name: "rosa-hcp-pool-0"
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+        kind: ROSAMachinePool
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ROSAMachinePool
+metadata:
+  name: "rosa-hcp-pool-0"
+  namespace: "ns-rosa-hcp"
+spec:
+  nodePoolName: "nodepool-0"
+  instanceType: "m5.xlarge"
+  labels:
+    profile: "rosa-worker"
+  subnet: "subnet-0326e816eaeb8ca8c"
+  autoRepair: true
+  nodeDrainGracePeriod: 1m
+  autoscaling:
+    maxReplicas: 5
+    minReplicas: 3
+  # additionalSecurityGroups:
+#   # - sg-075fc16f03781f80d # sec-group allow ssh
+# # Adding Day-2 ROSA machine pool to private subnet2
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachinePool
+metadata:
+  name: "rosa-hcp-pool-1"
+  namespace: "ns-rosa-hcp"
+spec:
+  clusterName: "rosa-hcp"
+  replicas: 1
+  template:
+    spec:
+      clusterName: "rosa-hcp"
+      bootstrap:
+        dataSecretName: ""
+      infrastructureRef:
+        name: "rosa-hcp-pool-1"
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+        kind: ROSAMachinePool
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ROSAMachinePool
+metadata:
+  name: "rosa-hcp-pool-1"
+  namespace: "ns-rosa-hcp"
+spec:
+  nodePoolName: "nodepool-1"
+  instanceType: "m5.xlarge"
+  subnet: "subnet-0326e816eaeb8ca8c"
+  autoRepair: true
+  nodeDrainGracePeriod: 1m
+  labels:
+    profile: "rosa-worker"
+#   autoscaling:
+#   maxReplicas: 5
+#    minReplicas: 3
+ # additionalSecurityGroups:
+ # - sg-075fc16f03781f80d 
+
