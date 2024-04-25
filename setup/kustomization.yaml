@@ -5,3 +5,4 @@ resources:
 - ns-rosa-hcp.yaml
 #- rosa-capi-cluster.yaml
 #- rosa-mp-capi-cluster.yaml
+
