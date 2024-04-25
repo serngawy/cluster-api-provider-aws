@@ -2,7 +2,9 @@
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
 metadata:
-  name: "rosa-hcp"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: "rosa-hcp-1"
   namespace: "ns-rosa-hcp"
 spec:
   clusterNetwork:
@@ -11,30 +13,36 @@ spec:
   infrastructureRef:
     apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
     kind: ROSACluster
-    name: "rosa-hcp"
+    name: "rosa-hcp-1"
+    namespace: "ns-rosa-hcp"
   controlPlaneRef:
     apiVersion: controlplane.cluster.x-k8s.io/v1beta2
     kind: ROSAControlPlane
-    name: "rosa-cp"
+    name: "rosa-cp-1"
+    namespace: "ns-rosa-hcp"
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ROSACluster
 metadata:
-  name: "rosa-hcp"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: "rosa-hcp-1"
   namespace: "ns-rosa-hcp"
 spec: {}
 ---
 apiVersion: controlplane.cluster.x-k8s.io/v1beta2
 kind: ROSAControlPlane
 metadata:
-  name: "rosa-cp"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: "rosa-cp-1"
   namespace: "ns-rosa-hcp"
 spec:
-  credentialsSecretRef:
-    name: rosa-creds-secret
-  rosaClusterName: rosa-hosted-control-plan-as-long-name-0
-  domainPrefix: mydomain
-  version: "4.15.0"
+#  credentialsSecretRef:
+#    name: rosa-creds-secret
+  rosaClusterName: rosa-hosted-control-plan-1
+  domainPrefix: myhcp
+  version: "4.15.12"
   region: "us-west-2"
   rolesRef:
     ingressARN: "arn:aws:iam::471112697682:role/melserng-openshift-ingress-operator-cloud-credentials"
@@ -47,13 +55,16 @@ spec:
     kmsProviderARN: "arn:aws:iam::471112697682:role/melserng-kube-system-kms-provider"
   oidcID: "2a0v5hcmdvfr0e20is7nsaflaemuoo81"
   subnets:
-    - subnet-0439a9481971304d2 #priv1
-    - subnet-028ec3298c315f148 #pub1
-    - subnet-0326e816eaeb8ca8c #priv2
-    - subnet-01c5a2ad8bbd2d89b #pub3
+    - "subnet-0c4115944b681cb31"
+    #- "subnet-05e53d1f35dba030c"
+    #- "subnet-0cd5f68a4ed79ee10"
+    - "subnet-09a92699fcab2ebab"
+    #- "subnet-0a128aea1e6d3d368"
+    #- "subnet-0a53f917809985cf2"
   availabilityZones:
     - "us-west-2b"
-    - "us-west-2a"
+    #- "us-west-2a"
+    #- "us-west-2d"
   installerRoleARN: "arn:aws:iam::471112697682:role/melserng-HCP-ROSA-Installer-Role"
   supportRoleARN: "arn:aws:iam::471112697682:role/melserng-HCP-ROSA-Support-Role"
   workerRoleARN: "arn:aws:iam::471112697682:role/melserng-HCP-ROSA-Worker-Role"
@@ -64,86 +75,105 @@ spec:
     #networkType: Other
   defaultMachinePoolSpec:
     instanceType: "m5.xlarge"
-    autoscaling:
-      maxReplicas: 4
-      minReplicas: 2
+#    autoscaling:
+#      maxReplicas: 9
+#      minReplicas: 1
   additionalTags:
     env: "demo"
     profile: "hcp"
   #provisionShardID: "88d699d7-7821-11ee-8b13-0a580a82022a"
 ---
+## Extra machinepools workers
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachinePool
 metadata:
-  name: "rosa-hcp-pool-0"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    cluster.x-k8s.io/replicas-managed-by: rosa
+  name: "workers-ex1"
   namespace: "ns-rosa-hcp"
 spec:
-  clusterName: "rosa-hcp"
+  clusterName: "rosa-hcp-1"
   replicas: 1
   template:
     spec:
-      clusterName: "rosa-hcp"
+      clusterName: "rosa-hcp-1"
       bootstrap:
         dataSecretName: ""
       infrastructureRef:
-        name: "rosa-hcp-pool-0"
+        name: "workers-ex1"
+        namespace: "ns-rosa-hcp"
         apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
         kind: ROSAMachinePool
+      nodeDeletionTimeout: 10s
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ROSAMachinePool
 metadata:
-  name: "rosa-hcp-pool-0"
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: "workers-ex1"
   namespace: "ns-rosa-hcp"
 spec:
-  nodePoolName: "nodepool-0"
+  nodePoolName: "workers-ex1"
   instanceType: "m5.xlarge"
   labels:
-    profile: "rosa-worker"
-  subnet: "subnet-0326e816eaeb8ca8c"
+    profile: "rosa-worker-ex1"
+  subnet: "subnet-0c4115944b681cb31"
   autoRepair: true
-  nodeDrainGracePeriod: 1m
+  nodeDrainGracePeriod: 1m0s
+  version: "4.15.12"
   autoscaling:
-    maxReplicas: 5
-    minReplicas: 3
-  # additionalSecurityGroups:
-#   # - sg-075fc16f03781f80d # sec-group allow ssh
-# # Adding Day-2 ROSA machine pool to private subnet2
----
-apiVersion: cluster.x-k8s.io/v1beta1
-kind: MachinePool
-metadata:
-  name: "rosa-hcp-pool-1"
-  namespace: "ns-rosa-hcp"
-spec:
-  clusterName: "rosa-hcp"
-  replicas: 1
-  template:
-    spec:
-      clusterName: "rosa-hcp"
-      bootstrap:
-        dataSecretName: ""
-      infrastructureRef:
-        name: "rosa-hcp-pool-1"
-        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
-        kind: ROSAMachinePool
----
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
-kind: ROSAMachinePool
-metadata:
-  name: "rosa-hcp-pool-1"
-  namespace: "ns-rosa-hcp"
-spec:
-  nodePoolName: "nodepool-1"
-  instanceType: "m5.xlarge"
-  subnet: "subnet-0326e816eaeb8ca8c"
-  autoRepair: true
-  nodeDrainGracePeriod: 1m
-  labels:
-    profile: "rosa-worker"
-#   autoscaling:
-#   maxReplicas: 5
-#    minReplicas: 3
- # additionalSecurityGroups:
- # - sg-075fc16f03781f80d 
-
+    maxReplicas: 6
+    minReplicas: 4
+  updateConfig:
+    rollingUpdate:
+      maxUnavailable: 2
+      maxSurge: 1
+#---
+#apiVersion: cluster.x-k8s.io/v1beta1
+#kind: MachinePool
+#metadata:
+#  annotations:
+#    argocd.argoproj.io/sync-wave: "1"
+#    cluster.x-k8s.io/replicas-managed-by: rosa
+#  name: "workers-ex"
+#  namespace: "ns-rosa-hcp"
+#spec:
+#  clusterName: "rosa-hcp-1"
+#  replicas: 1
+#  template:
+#    spec:
+#      clusterName: "rosa-hcp-1"
+#      bootstrap:
+#        dataSecretName: ""
+#      infrastructureRef:
+#        name: "workers-ex"
+#        namespace: "ns-rosa-hcp"
+#        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+#        kind: ROSAMachinePool
+#---
+#apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+#kind: ROSAMachinePool
+#metadata:
+#  annotations:
+#    argocd.argoproj.io/sync-wave: "1"
+#  name: "workers-ex"
+#  namespace: "ns-rosa-hcp"
+#spec:
+#  nodePoolName: "workers-ex"
+#  instanceType: "m5.xlarge"
+#  labels:
+#    profile: "rosa-worker-ex"
+#  subnet: "subnet-0db61cbb0056e9cf1"
+#  autoRepair: true
+#  nodeDrainGracePeriod: 1m0s
+#  version: "4.15.8"
+#  autoscaling:
+#    maxReplicas: 6
+#    minReplicas: 4
+#  updateConfig:
+#    rollingUpdate:
+#      maxUnavailable: 2
+#      maxSurge: 1
+#---
