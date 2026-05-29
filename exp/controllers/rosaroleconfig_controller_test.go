@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	infrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/api/v1beta2"
 	rosacontrolplanev1 "sigs.k8s.io/cluster-api-provider-aws/v2/controlplane/rosa/api/v1beta2"
 	expinfrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/exp/api/v1beta2"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/scope"
@@ -896,4 +898,250 @@ func TestROSARoleConfigReconcileDelete(t *testing.T) {
 		// If object still exists, verify finalizers are removed
 		g.Expect(deletedRoleConfig.Finalizers).To(BeEmpty(), "Finalizers should be removed after successful deletion")
 	}
+}
+
+// fakeSTSAssumeRoleResponse returns valid STS AssumeRole XML for the fake STS httptest server.
+func fakeSTSAssumeRoleResponse(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/xml")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <AssumeRoleResult>
+    <Credentials>
+      <AccessKeyId>ASIAIOSFODNN7EXAMPLE</AccessKeyId>
+      <SecretAccessKey>wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY</SecretAccessKey>
+      <SessionToken>AQoXnyc4MCrrlandlJKwBQ==</SessionToken>
+      <Expiration>2030-01-01T00:00:00Z</Expiration>
+    </Credentials>
+    <AssumedRoleUser>
+      <Arn>arn:aws:sts::123456789012:assumed-role/fake-rosa-role/test</Arn>
+      <AssumedRoleId>ARO123EXAMPLE123:test</AssumedRoleId>
+    </AssumedRoleUser>
+  </AssumeRoleResult>
+  <ResponseMetadata>
+    <RequestId>12345678-1234-1234-1234-123456789012</RequestId>
+  </ResponseMetadata>
+</AssumeRoleResponse>`)
+}
+
+// TestROSARoleConfigReconcilerWithRoleIdentity verifies that ROSARoleConfigReconciler can
+// create its scope (resolving credentials) when the ROSARoleConfig's IdentityRef points
+// to an AWSClusterRoleIdentity backed by a fake IAM role.
+//
+// The fake STS server satisfies the AssumeRole call that happens during scope creation.
+// The runtimeFactory is used as a canary: if it is called, scope creation (including
+// credential resolution via AWSClusterRoleIdentity) succeeded.
+func TestROSARoleConfigReconcilerWithRoleIdentity(t *testing.T) {
+	RegisterTestingT(t)
+	g := NewWithT(t)
+	ctx := context.TODO()
+
+	// Start a local STS server that returns fake AssumeRole credentials.
+	stsServer := httptest.NewServer(http.HandlerFunc(fakeSTSAssumeRoleResponse))
+	defer stsServer.Close()
+
+	// Point the AWS SDK at the fake STS server and supply dummy source credentials so
+	// config.LoadDefaultConfig has something to work with when building the STS client.
+	t.Setenv("AWS_ENDPOINT_URL_STS", stsServer.URL)
+	t.Setenv("AWS_ACCESS_KEY_ID", "fake-access-key-id")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "fake-secret-access-key")
+	t.Setenv("AWS_REGION", "us-east-1")
+
+	testID := generateTestID()
+
+	ns, err := testEnv.CreateNamespace(ctx, fmt.Sprintf("test-ns-roleident-%s", testID))
+	g.Expect(err).ToNot(HaveOccurred())
+
+	// AWSClusterControllerIdentity is the source for the role identity.
+	// The webhook requires sourceIdentityRef to be non-nil, so we use the controller
+	// identity as a source — it returns no providers of its own, causing the role
+	// provider to fall back to the env-var credentials when calling STS.
+	controllerIdentity := &infrav1.AWSClusterControllerIdentity{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "default",
+		},
+		Spec: infrav1.AWSClusterControllerIdentitySpec{
+			AWSClusterIdentitySpec: infrav1.AWSClusterIdentitySpec{
+				AllowedNamespaces: &infrav1.AllowedNamespaces{},
+			},
+		},
+	}
+	createObject(g, controllerIdentity, ns.Name)
+	defer cleanupObject(g, controllerIdentity)
+
+	// AWSClusterRoleIdentity with a fake IAM role ARN — AllowedNamespaces is empty,
+	// meaning every namespace may use this identity.
+	roleIdentity := &infrav1.AWSClusterRoleIdentity{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("fake-role-identity-%s", testID),
+		},
+		Spec: infrav1.AWSClusterRoleIdentitySpec{
+			AWSRoleSpec: infrav1.AWSRoleSpec{
+				RoleArn:     fmt.Sprintf("arn:aws:iam::123456789012:role/fake-rosa-role-%s", testID),
+				SessionName: "test-session",
+			},
+			AWSClusterIdentitySpec: infrav1.AWSClusterIdentitySpec{
+				AllowedNamespaces: &infrav1.AllowedNamespaces{},
+			},
+			SourceIdentityRef: &infrav1.AWSIdentityReference{
+				Name: controllerIdentity.Name,
+				Kind: infrav1.ControllerIdentityKind,
+			},
+		},
+	}
+	roleIdentity.SetGroupVersionKind(infrav1.GroupVersion.WithKind("AWSClusterRoleIdentity"))
+	createObject(g, roleIdentity, ns.Name)
+	defer cleanupObject(g, roleIdentity)
+
+	rosaRoleConfig := &expinfrav1.ROSARoleConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       fmt.Sprintf("test-role-config-%s", testID),
+			Namespace:  ns.Name,
+			Finalizers: []string{expinfrav1.RosaRoleConfigFinalizer},
+		},
+		Spec: expinfrav1.ROSARoleConfigSpec{
+			AccountRoleConfig: expinfrav1.AccountRoleConfig{
+				Prefix:  "test",
+				Version: "4.15.0",
+			},
+			OperatorRoleConfig: expinfrav1.OperatorRoleConfig{
+				Prefix: "test",
+			},
+			OidcProviderType: expinfrav1.Managed,
+			IdentityRef: &infrav1.AWSIdentityReference{
+				Name: roleIdentity.Name,
+				Kind: infrav1.ClusterRoleIdentityKind,
+			},
+		},
+	}
+	createObject(g, rosaRoleConfig, ns.Name)
+	defer cleanupObject(g, rosaRoleConfig)
+
+	runtimeCalled := false
+	reconciler := &ROSARoleConfigReconciler{
+		Client: testEnv.Client,
+		// runtimeFactory acts as a canary: if it is invoked, scope creation (and
+		// therefore AWSClusterRoleIdentity credential resolution) succeeded.
+		runtimeFactory: func(_ context.Context, _ *scope.RosaRoleConfigScope) (*rosacli.Runtime, error) {
+			runtimeCalled = true
+			return nil, fmt.Errorf("sentinel: runtimeFactory reached after role-identity scope creation")
+		},
+	}
+
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: rosaRoleConfig.Name, Namespace: rosaRoleConfig.Namespace},
+	}
+
+	g.Eventually(func(g Gomega) {
+		_, errReconcile := reconciler.Reconcile(ctx, req)
+
+		// The reconciler must have advanced past scope creation and reached runtimeFactory.
+		// A "failed to create rosaroleconfig scope" error here would mean credential
+		// resolution via AWSClusterRoleIdentity failed.
+		g.Expect(errReconcile).To(HaveOccurred())
+		g.Expect(errReconcile.Error()).To(ContainSubstring("failed to set up runtime"))
+		g.Expect(errReconcile.Error()).NotTo(ContainSubstring("failed to create rosaroleconfig scope"))
+		g.Expect(runtimeCalled).To(BeTrue())
+	}).WithTimeout(30 * time.Second).WithPolling(500 * time.Millisecond).Should(Succeed())
+}
+
+// TestROSARoleConfigReconcilerWithRoleIdentityNamespaceNotAllowed verifies that when the
+// AWSClusterRoleIdentity's AllowedNamespaces does not include the ROSARoleConfig's namespace,
+// scope creation fails with a credential error and the runtimeFactory is never called.
+func TestROSARoleConfigReconcilerWithRoleIdentityNamespaceNotAllowed(t *testing.T) {
+	RegisterTestingT(t)
+	g := NewWithT(t)
+	ctx := context.TODO()
+
+	stsServer := httptest.NewServer(http.HandlerFunc(fakeSTSAssumeRoleResponse))
+	defer stsServer.Close()
+
+	t.Setenv("AWS_ENDPOINT_URL_STS", stsServer.URL)
+	t.Setenv("AWS_ACCESS_KEY_ID", "fake-access-key-id")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "fake-secret-access-key")
+	t.Setenv("AWS_REGION", "us-east-1")
+
+	testID := generateTestID()
+
+	ns, err := testEnv.CreateNamespace(ctx, fmt.Sprintf("test-ns-roleident-denied-%s", testID))
+	g.Expect(err).ToNot(HaveOccurred())
+
+	controllerIdentity := &infrav1.AWSClusterControllerIdentity{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "default",
+		},
+		Spec: infrav1.AWSClusterControllerIdentitySpec{
+			AWSClusterIdentitySpec: infrav1.AWSClusterIdentitySpec{
+				AllowedNamespaces: &infrav1.AllowedNamespaces{},
+			},
+		},
+	}
+	createObject(g, controllerIdentity, ns.Name)
+	defer cleanupObject(g, controllerIdentity)
+
+	// AllowedNamespaces lists only "other-namespace", so ns.Name is not permitted.
+	roleIdentity := &infrav1.AWSClusterRoleIdentity{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("restricted-role-identity-%s", testID),
+		},
+		Spec: infrav1.AWSClusterRoleIdentitySpec{
+			AWSRoleSpec: infrav1.AWSRoleSpec{
+				RoleArn:     fmt.Sprintf("arn:aws:iam::123456789012:role/restricted-rosa-role-%s", testID),
+				SessionName: "test-session",
+			},
+			AWSClusterIdentitySpec: infrav1.AWSClusterIdentitySpec{
+				AllowedNamespaces: &infrav1.AllowedNamespaces{
+					NamespaceList: []string{"other-namespace"},
+				},
+			},
+			SourceIdentityRef: &infrav1.AWSIdentityReference{
+				Name: controllerIdentity.Name,
+				Kind: infrav1.ControllerIdentityKind,
+			},
+		},
+	}
+	roleIdentity.SetGroupVersionKind(infrav1.GroupVersion.WithKind("AWSClusterRoleIdentity"))
+	createObject(g, roleIdentity, ns.Name)
+	defer cleanupObject(g, roleIdentity)
+
+	rosaRoleConfig := &expinfrav1.ROSARoleConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       fmt.Sprintf("test-role-config-denied-%s", testID),
+			Namespace:  ns.Name,
+			Finalizers: []string{expinfrav1.RosaRoleConfigFinalizer},
+		},
+		Spec: expinfrav1.ROSARoleConfigSpec{
+			AccountRoleConfig: expinfrav1.AccountRoleConfig{
+				Prefix:  "test",
+				Version: "4.15.0",
+			},
+			OperatorRoleConfig: expinfrav1.OperatorRoleConfig{Prefix: "test"},
+			OidcProviderType:   expinfrav1.Managed,
+			IdentityRef: &infrav1.AWSIdentityReference{
+				Name: roleIdentity.Name,
+				Kind: infrav1.ClusterRoleIdentityKind,
+			},
+		},
+	}
+	createObject(g, rosaRoleConfig, ns.Name)
+	defer cleanupObject(g, rosaRoleConfig)
+
+	runtimeCalled := false
+	reconciler := &ROSARoleConfigReconciler{
+		Client: testEnv.Client,
+		runtimeFactory: func(_ context.Context, _ *scope.RosaRoleConfigScope) (*rosacli.Runtime, error) {
+			runtimeCalled = true
+			return nil, nil
+		},
+	}
+
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: rosaRoleConfig.Name, Namespace: rosaRoleConfig.Namespace},
+	}
+
+	_, errReconcile := reconciler.Reconcile(ctx, req)
+
+	// Scope creation must fail because the namespace is not in AllowedNamespaces.
+	g.Expect(errReconcile).To(HaveOccurred())
+	g.Expect(errReconcile.Error()).To(ContainSubstring("failed to create rosaroleconfig scope"))
+	g.Expect(runtimeCalled).To(BeFalse())
 }

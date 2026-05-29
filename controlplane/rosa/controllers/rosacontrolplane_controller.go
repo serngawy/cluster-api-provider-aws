@@ -1368,8 +1368,11 @@ func (r *ROSAControlPlaneReconciler) resolveCreatorForTargetAccount(ctx context.
 		return creator, nil
 	}
 
-	targetAccountID := accountIDFromRoleARN(installerRoleARN)
-	if targetAccountID == "" || targetAccountID == creator.AccountID {
+	targetAccountID, err := accountIDFromRoleARN(installerRoleARN)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse account ID from InstallerRoleARN %q: %w", installerRoleARN, err)
+	}
+	if targetAccountID == creator.AccountID {
 		return creator, nil // same account — no cross-account assumption needed
 	}
 
@@ -1379,7 +1382,7 @@ func (r *ROSAControlPlaneReconciler) resolveCreatorForTargetAccount(ctx context.
 	session := rosaScope.Session()
 	stsSvc := stsv2sdk.NewFromConfig(session)
 	assumeRoleProvider := stscreds.NewAssumeRoleProvider(stsSvc, installerRoleARN, func(o *stscreds.AssumeRoleOptions) {
-		o.RoleSessionName = "capa-session"
+		o.RoleSessionName = fmt.Sprintf("%s-%s", "capa-session", rosaScope.ControlPlane.Spec.RosaClusterName)
 	})
 
 	targetSession := awsv2.Config{
@@ -1404,13 +1407,13 @@ func (r *ROSAControlPlaneReconciler) resolveCreatorForTargetAccount(ctx context.
 	return targetCreator, nil
 }
 
-// accountIDFromRoleARN parses the AWS account ID from a role ARN using the AWS ARN parser.
-func accountIDFromRoleARN(roleARN string) string {
+// accountIDFromRoleARN parses the AWS account ID from a role ARN.
+func accountIDFromRoleARN(roleARN string) (string, error) {
 	parsed, err := arn.Parse(roleARN)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return parsed.AccountID
+	return parsed.AccountID, nil
 }
 
 // newAWSClient creates a ROSA AWS client per reconciliation using the scope's session so that
