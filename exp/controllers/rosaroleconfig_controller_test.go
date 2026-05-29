@@ -449,65 +449,35 @@ func TestROSARoleConfigReconcileExist(t *testing.T) {
 	mockAWSClient.EXPECT().HasManagedPolicies(gomock.Any()).Return(false, nil).AnyTimes()
 	mockAWSClient.EXPECT().HasHostedCPPolicies(gomock.Any()).Return(true, nil).AnyTimes()
 
-	// Return existing account roles
-	mockAWSClient.EXPECT().ListAccountRoles(gomock.Any()).Return([]aws.Role{
-		{
-			RoleName: "test-HCP-ROSA-Installer-Role",
-			RoleARN:  "arn:aws:iam::123456789012:role/test-HCP-ROSA-Installer-Role",
-		},
-		{
-			RoleName: "test-HCP-ROSA-Support-Role",
-			RoleARN:  "arn:aws:iam::123456789012:role/test-HCP-ROSA-Support-Role",
-		},
-		{
-			RoleName: "test-HCP-ROSA-Worker-Role",
-			RoleARN:  "arn:aws:iam::123456789012:role/test-HCP-ROSA-Worker-Role",
-		},
-	}, nil).AnyTimes()
+	// Return existing account roles by exact name (avoids ListAccountRoles → ListRoleTags throttling).
+	mockAWSClient.EXPECT().GetRoleByName("test-HCP-ROSA-Installer-Role").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-HCP-ROSA-Installer-Role")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-HCP-ROSA-Support-Role").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-HCP-ROSA-Support-Role")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-HCP-ROSA-Worker-Role").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-HCP-ROSA-Worker-Role")}, nil).AnyTimes()
 
-	// Return existing operator roles
-	mockAWSClient.EXPECT().ListOperatorRoles(gomock.Any(), gomock.Any(), gomock.Any()).Return(map[string][]aws.OperatorRoleDetail{
-		"test": {
-			{
-				RoleName: "test-openshift-ingress-operator-cloud-credentials",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-openshift-ingress-operator-cloud-credentials",
-			},
-			{
-				RoleName: "test-openshift-image-registry-installer-cloud-credentials",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-openshift-image-registry-installer-cloud-credentials",
-			},
-			{
-				RoleName: "test-openshift-cluster-csi-drivers-ebs-cloud-credentials",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-openshift-cluster-csi-drivers-ebs-cloud-credentials",
-			},
-			{
-				RoleName: "test-openshift-cloud-network-config-controller-cloud-credentials",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-openshift-cloud-network-config-controller-cloud-credentials",
-			},
-			{
-				RoleName: "test-kube-system-kube-controller-manager",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-kube-system-kube-controller-manager",
-			},
-			{
-				RoleName: "test-kube-system-capa-controller-manager",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-kube-system-capa-controller-manager",
-			},
-			{
-				RoleName: "test-kube-system-control-plane-operator",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-kube-system-control-plane-operator",
-			},
-			{
-				RoleName: "test-kube-system-kms-provider",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-kube-system-kms-provider",
-			},
-		},
-	}, nil).AnyTimes()
-	// Return existing OIDC providers
-	mockAWSClient.EXPECT().ListOidcProviders(gomock.Any(), gomock.Any()).Return([]aws.OidcProviderOutput{
-		{
-			Arn: "arn:aws:iam::123456789012:oidc-provider/test-existing-oidc-id",
-		},
-	}, nil).AnyTimes()
+	// Return existing operator roles by exact name (avoids ListOperatorRoles → ListRoleTags throttling).
+	mockAWSClient.EXPECT().GetRoleByName("test-openshift-ingress-operator-cloud-credentials").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-openshift-ingress-operator-cloud-credentials")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-openshift-image-registry-installer-cloud-credentials").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-openshift-image-registry-installer-cloud-credentials")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-openshift-cluster-csi-drivers-ebs-cloud-credentials").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-openshift-cluster-csi-drivers-ebs-cloud-credentials")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-openshift-cloud-network-config-controller-cloud-credentials").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-openshift-cloud-network-config-controller-cloud-credentials")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-kube-system-kube-controller-manager").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-kube-system-kube-controller-manager")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-kube-system-capa-controller-manager").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-kube-system-capa-controller-manager")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-kube-system-control-plane-operator").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-kube-system-control-plane-operator")}, nil).AnyTimes()
+	mockAWSClient.EXPECT().GetRoleByName("test-kube-system-kms-provider").Return(
+		iamTypes.Role{Arn: awsSdk.String("arn:aws:iam::123456789012:role/test-kube-system-kms-provider")}, nil).AnyTimes()
+
+	// Return existing OIDC provider ARN by issuer URL (avoids ListOpenIDConnectProviderTags throttling).
+	mockAWSClient.EXPECT().GetOpenIDConnectProviderByOidcEndpointUrl("https://test.existing.oidc.url").Return(
+		"arn:aws:iam::123456789012:oidc-provider/test-existing-oidc-id", nil).AnyTimes()
 
 	mockAWSClient.EXPECT().GetCreator().Return(&aws.Creator{
 		ARN:       "arn:aws:iam::123456789012:user/test-user",
@@ -774,66 +744,6 @@ func TestROSARoleConfigReconcileDelete(t *testing.T) {
 		"test-kube-system-capa-controller-manager",
 		"test-kube-system-control-plane-operator",
 		"test-kube-system-kms-provider",
-	}, nil).AnyTimes()
-
-	// Return existing account roles that will be deleted
-	mockAWSClient.EXPECT().ListAccountRoles(gomock.Any()).Return([]aws.Role{
-		{
-			RoleName: "test-HCP-ROSA-Installer-Role",
-			RoleARN:  "arn:aws:iam::123456789012:role/test-HCP-ROSA-Installer-Role",
-		},
-		{
-			RoleName: "test-HCP-ROSA-Support-Role",
-			RoleARN:  "arn:aws:iam::123456789012:role/test-HCP-ROSA-Support-Role",
-		},
-		{
-			RoleName: "test-HCP-ROSA-Worker-Role",
-			RoleARN:  "arn:aws:iam::123456789012:role/test-HCP-ROSA-Worker-Role",
-		},
-	}, nil).AnyTimes()
-
-	mockAWSClient.EXPECT().ListOperatorRoles(gomock.Any(), gomock.Any(), gomock.Any()).Return(map[string][]aws.OperatorRoleDetail{
-		"test": {
-			{
-				RoleName: "test-openshift-ingress-operator-cloud-credentials",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-openshift-ingress-operator-cloud-credentials",
-			},
-			{
-				RoleName: "test-openshift-image-registry-installer-cloud-credentials",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-openshift-image-registry-installer-cloud-credentials",
-			},
-			{
-				RoleName: "test-openshift-cluster-csi-drivers-ebs-cloud-credentials",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-openshift-cluster-csi-drivers-ebs-cloud-credentials",
-			},
-			{
-				RoleName: "test-openshift-cloud-network-config-controller-cloud-credentials",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-openshift-cloud-network-config-controller-cloud-credentials",
-			},
-			{
-				RoleName: "test-kube-system-kube-controller-manager",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-kube-system-kube-controller-manager",
-			},
-			{
-				RoleName: "test-kube-system-capa-controller-manager",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-kube-system-capa-controller-manager",
-			},
-			{
-				RoleName: "test-kube-system-control-plane-operator",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-kube-system-control-plane-operator",
-			},
-			{
-				RoleName: "test-kube-system-kms-provider",
-				RoleARN:  "arn:aws:iam::123456789012:role/test-kube-system-kms-provider",
-			},
-		},
-	}, nil).AnyTimes()
-
-	// Return existing OIDC providers that will be deleted
-	mockAWSClient.EXPECT().ListOidcProviders(gomock.Any(), gomock.Any()).Return([]aws.OidcProviderOutput{
-		{
-			Arn: "arn:aws:iam::123456789012:oidc-provider/test-existing-oidc-id",
-		},
 	}, nil).AnyTimes()
 
 	// Delete operator roles (called individually for each role)
