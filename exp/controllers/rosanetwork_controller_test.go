@@ -39,6 +39,7 @@ import (
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/api/v1beta2"
 	expinfrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/exp/api/v1beta2"
+	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/scope"
 	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	v1beta1conditions "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 )
@@ -106,7 +107,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 
 	t.Run("Empty result when ROSANetwork object not found", func(t *testing.T) {
-		_, _, _, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, _, _, _, reconciler := createMockClients(mockCtrl)
 
 		req := ctrl.Request{}
 		req.NamespacedName = types.NamespacedName{Name: "non-existent-object", Namespace: "non-existent-namespace"}
@@ -117,7 +120,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("Error result when CF stack GET returns error", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 		mockDescribeStacksCall(mockCFClient, &cloudformation.DescribeStacksOutput{}, fmt.Errorf("test-error"), 1)
@@ -131,7 +136,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("Initial CF stack creation fails", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -161,7 +168,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("Initial CF stack creation succeeds", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -190,7 +199,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("CF stack creation is in progress", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -221,7 +232,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("CF stack creation completed", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -252,7 +265,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("CF stack creation failed", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -283,7 +298,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("CF stack deletion start failed", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -316,7 +333,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("CF stack deletion start succeeded", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -349,7 +368,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("CF stack deletion in progress", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -374,7 +395,9 @@ func TestROSANetworkReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("CF stack deletion failed", func(t *testing.T) {
-		_, mockCFClient, mockSTSClient, reconciler := createMockClients(mockCtrl)
+		g := NewWithT(t)
+
+		_, mockCFClient, mockSTSClient, _, reconciler := createMockClients(mockCtrl)
 
 		mockSTSIdentity(mockSTSClient)
 
@@ -429,17 +452,17 @@ func TestROSANetworkReconciler_updateROSANetworkResources(t *testing.T) {
 	}
 
 	t.Run("Handle cloudformation client error", func(t *testing.T) {
-		_, mockCFClient, _, reconciler := createMockClients(mockCtrl)
+		_, mockCFClient, _, awsClient, reconciler := createMockClients(mockCtrl)
 
 		mockDescribeStackResourcesCall(mockCFClient, &cloudformation.DescribeStackResourcesOutput{}, fmt.Errorf("test-error"), 1)
 
-		err := reconciler.updateROSANetworkResources(ctx, rosaNetwork)
+		err := reconciler.updateROSANetworkResources(ctx, rosaNetwork, awsClient)
 		g.Expect(err).To(HaveOccurred())
 		g.Expect(len(rosaNetwork.Status.Resources)).To(Equal(0))
 	})
 
 	t.Run("Update ROSANetwork.Status.Resources", func(t *testing.T) {
-		_, mockCFClient, _, reconciler := createMockClients(mockCtrl)
+		_, mockCFClient, _, awsClient, reconciler := createMockClients(mockCtrl)
 
 		logicalResourceID := "logical-resource-id"
 		resourceStatus := cloudformationtypes.ResourceStatusCreateComplete
@@ -461,7 +484,7 @@ func TestROSANetworkReconciler_updateROSANetworkResources(t *testing.T) {
 
 		mockDescribeStackResourcesCall(mockCFClient, describeStackResourcesOutput, nil, 1)
 
-		err := reconciler.updateROSANetworkResources(ctx, rosaNetwork)
+		err := reconciler.updateROSANetworkResources(ctx, rosaNetwork, awsClient)
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(rosaNetwork.Status.Resources[0].LogicalID).To(Equal(logicalResourceID))
 		g.Expect(rosaNetwork.Status.Resources[0].Status).To(Equal(string(resourceStatus)))
@@ -512,17 +535,17 @@ func TestROSANetworkReconciler_parseSubnets(t *testing.T) {
 	}
 
 	t.Run("Handle EC2 client error", func(t *testing.T) {
-		mockEC2Client, _, _, reconciler := createMockClients(mockCtrl)
+		mockEC2Client, _, _, awsClient, reconciler := createMockClients(mockCtrl)
 
 		mockDescribeSubnetsCall(mockEC2Client, &ec2.DescribeSubnetsOutput{}, nil, 1)
 
-		err := reconciler.parseSubnets(rosaNetwork)
+		err := reconciler.parseSubnets(rosaNetwork, awsClient)
 		g.Expect(err).To(HaveOccurred())
 		g.Expect(len(rosaNetwork.Status.Subnets)).To(Equal(0))
 	})
 
 	t.Run("Update ROSANetwork.Status.Subnets", func(t *testing.T) {
-		mockEC2Client, _, _, reconciler := createMockClients(mockCtrl)
+		mockEC2Client, _, _, awsClient, reconciler := createMockClients(mockCtrl)
 
 		az := "az01"
 
@@ -536,7 +559,7 @@ func TestROSANetworkReconciler_parseSubnets(t *testing.T) {
 
 		mockDescribeSubnetsCall(mockEC2Client, describeSubnetsOutput, nil, 2)
 
-		err := reconciler.parseSubnets(rosaNetwork)
+		err := reconciler.parseSubnets(rosaNetwork, awsClient)
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(rosaNetwork.Status.Subnets[0].AvailabilityZone).To(Equal(az))
 		g.Expect(rosaNetwork.Status.Subnets[0].PrivateSubnet).To(Equal(subnet1Id))
@@ -544,7 +567,7 @@ func TestROSANetworkReconciler_parseSubnets(t *testing.T) {
 	})
 }
 
-func createMockClients(mockCtrl *gomock.Controller) (*rosaMocks.MockEc2ApiClient, *rosaMocks.MockCloudFormationApiClient, *rosaMocks.MockStsApiClient, *ROSANetworkReconciler) {
+func createMockClients(mockCtrl *gomock.Controller) (*rosaMocks.MockEc2ApiClient, *rosaMocks.MockCloudFormationApiClient, *rosaMocks.MockStsApiClient, rosaAWSClient.Client, *ROSANetworkReconciler) {
 	mockEC2Client := rosaMocks.NewMockEc2ApiClient(mockCtrl)
 	mockCFClient := rosaMocks.NewMockCloudFormationApiClient(mockCtrl)
 	mockSTSClient := rosaMocks.NewMockStsApiClient(mockCtrl)
@@ -565,11 +588,13 @@ func createMockClients(mockCtrl *gomock.Controller) (*rosaMocks.MockEc2ApiClient
 	)
 
 	reconciler := &ROSANetworkReconciler{
-		Client:    testEnv.Client,
-		awsClient: awsClient,
+		Client: testEnv.Client,
+		awsClientFactory: func(_ *scope.ROSANetworkScope) (rosaAWSClient.Client, error) {
+			return awsClient, nil
+		},
 	}
 
-	return mockEC2Client, mockCFClient, mockSTSClient, reconciler
+	return mockEC2Client, mockCFClient, mockSTSClient, awsClient, reconciler
 }
 
 func mockSTSIdentity(mockSTSClient *rosaMocks.MockStsApiClient) {

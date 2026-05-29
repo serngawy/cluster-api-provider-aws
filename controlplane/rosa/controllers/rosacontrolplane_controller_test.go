@@ -36,9 +36,9 @@ import (
 	v1 "github.com/openshift-online/ocm-sdk-go/clustersmgmt/v1"
 	rosaaws "github.com/openshift/rosa/pkg/aws"
 	"github.com/openshift/rosa/pkg/ocm"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	restclient "k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -46,10 +46,8 @@ import (
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/api/v1beta2"
 	rosacontrolplanev1 "sigs.k8s.io/cluster-api-provider-aws/v2/controlplane/rosa/api/v1beta2"
-	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud"
+	expinfrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/exp/api/v1beta2"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/scope"
-	stsiface "sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/services/sts"
-	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/services/sts/mock_stsiface"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/logger"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/rosa"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/test/mocks"
@@ -58,6 +56,46 @@ import (
 	v1beta1conditions "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 )
+
+// fakeStsAPIClient is a minimal implementation of rosaaws.StsApiClient for use in tests.
+// It returns a fixed caller identity without needing a mock framework.
+type fakeStsAPIClient struct {
+	account string
+	arn     string
+	userID  string
+}
+
+func (f *fakeStsAPIClient) GetCallerIdentity(_ context.Context, _ *stsv2.GetCallerIdentityInput, _ ...func(*stsv2.Options)) (*stsv2.GetCallerIdentityOutput, error) {
+	return &stsv2.GetCallerIdentityOutput{
+		Account: aws.String(f.account),
+		Arn:     aws.String(f.arn),
+		UserId:  aws.String(f.userID),
+	}, nil
+}
+
+func (f *fakeStsAPIClient) AssumeRole(_ context.Context, _ *stsv2.AssumeRoleInput, _ ...func(*stsv2.Options)) (*stsv2.AssumeRoleOutput, error) {
+	return nil, nil
+}
+
+func (f *fakeStsAPIClient) AssumeRoleWithWebIdentity(_ context.Context, _ *stsv2.AssumeRoleWithWebIdentityInput, _ ...func(*stsv2.Options)) (*stsv2.AssumeRoleWithWebIdentityOutput, error) {
+	return nil, nil
+}
+
+// newFakeAWSClientFactory returns an awsClientFactory that injects a rosaaws.Client backed by
+// the given fakeStsAPIClient. GetCreator() on the returned client will use that STS stub.
+func newFakeAWSClientFactory(fakeSts *fakeStsAPIClient) func(*scope.ROSAControlPlaneScope) (rosaaws.Client, error) {
+	return func(_ *scope.ROSAControlPlaneScope) (rosaaws.Client, error) {
+		return rosaaws.New(
+			aws.Config{},
+			rosaaws.NewLoggerWrapper(logrus.New(), nil),
+			nil, nil, nil, nil, nil,
+			fakeSts,
+			nil, nil, nil,
+			&rosaaws.AccessKey{},
+			false,
+		), nil
+	}
+}
 
 func TestUpdateOCMClusterSpec(t *testing.T) {
 	g := NewWithT(t)
@@ -422,10 +460,12 @@ func TestRosaControlPlaneReconcileStatusVersion(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	ctx := context.TODO()
 	ocmMock := mocks.NewMockOCMClient(mockCtrl)
-	stsMock := mock_stsiface.NewMockSTSClient(mockCtrl)
 
-	getCallerIdentityResult := &stsv2.GetCallerIdentityOutput{Account: aws.String("foo"), Arn: aws.String("arn:aws:iam::123456789012:rosa/foo")}
-	stsMock.EXPECT().GetCallerIdentity(gomock.Any(), gomock.Any()).Return(getCallerIdentityResult, nil).Times(1)
+	fakeSts := &fakeStsAPIClient{
+		account: "foo",
+		arn:     "arn:aws:iam::123456789012:rosa/foo",
+		userID:  "user-id",
+	}
 
 	expect := func(m *mocks.MockOCMClientMockRecorder) {
 		m.ValidateHypershiftVersion(gomock.Any(), gomock.Any()).DoAndReturn(func(clusterId string, nodePoolID string) (bool, error) {
@@ -530,9 +570,7 @@ func TestRosaControlPlaneReconcileStatusVersion(t *testing.T) {
 		WatchFilterValue: "",
 		Client:           testEnv,
 		restClientConfig: cfg,
-		NewStsClient: func(cloud.ScopeUsage, cloud.Session, logger.Wrapper, runtime.Object) stsiface.STSClient {
-			return stsMock
-		},
+		awsClientFactory: newFakeAWSClientFactory(fakeSts),
 		NewOCMClient: func(ctx context.Context, rosaScope *scope.ROSAControlPlaneScope) (rosa.OCMClient, error) {
 			return ocmMock, nil
 		},
