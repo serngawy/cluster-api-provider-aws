@@ -114,6 +114,11 @@ func (s *ROSAControlPlaneScope) Session() awsv2.Config {
 	return s.session
 }
 
+// SetSession replaces the AWS SDK V2 session. Intended for use in tests to inject a pre-configured session.
+func (s *ROSAControlPlaneScope) SetSession(session awsv2.Config) {
+	s.session = session
+}
+
 // ServiceLimiter returns the AWS SDK session. Used for creating clients.
 func (s *ROSAControlPlaneScope) ServiceLimiter(service string) *throttle.ServiceLimiter {
 	if sl, ok := s.serviceLimiters[service]; ok {

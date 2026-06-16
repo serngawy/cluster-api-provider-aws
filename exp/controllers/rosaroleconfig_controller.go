@@ -36,7 +36,6 @@ import (
 	rosacli "github.com/openshift/rosa/pkg/rosa"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -47,9 +46,7 @@ import (
 
 	"sigs.k8s.io/cluster-api-provider-aws/v2/controlplane/rosa/api/v1beta2"
 	expinfrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/exp/api/v1beta2"
-	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/scope"
-	stsiface "sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/services/sts"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/logger"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/rosa"
 	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
@@ -62,7 +59,6 @@ type ROSARoleConfigReconciler struct {
 	client.Client
 	Recorder         record.EventRecorder
 	WatchFilterValue string
-	NewStsClient     func(cloud.ScopeUsage, cloud.Session, logger.Wrapper, runtime.Object) stsiface.STSClient
 	NewOCMClient     func(ctx context.Context, scope rosa.OCMSecretsRetriever) (rosa.OCMClient, error)
 	// runtimeFactory overrides runtime creation per reconciliation. Used in tests to inject mock clients.
 	runtimeFactory func(ctx context.Context, scope *scope.RosaRoleConfigScope) (*rosacli.Runtime, error)
@@ -77,7 +73,6 @@ type roleNameLookup struct {
 func (r *ROSARoleConfigReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	log := logger.FromContext(ctx)
 	r.NewOCMClient = rosa.NewWrappedOCMClientWithoutControlPlane
-	r.NewStsClient = scope.NewSTSClient
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&expinfrav1.ROSARoleConfig{}).
@@ -143,14 +138,14 @@ func (r *ROSARoleConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileOIDC(scope, rt); err != nil {
-		v1beta1conditions.MarkFalse(scope.RosaRoleConfig, expinfrav1.RosaRoleConfigReadyCondition, expinfrav1.RosaRoleConfigReconciliationFailedReason, clusterv1beta1.ConditionSeverityError, "OIDC Config/provider failure: %v", err)
-		return ctrl.Result{}, fmt.Errorf("oicd Config: %w", err)
-	}
-
 	if err := r.reconcileAccountRoles(scope, rt); err != nil {
 		v1beta1conditions.MarkFalse(scope.RosaRoleConfig, expinfrav1.RosaRoleConfigReadyCondition, expinfrav1.RosaRoleConfigReconciliationFailedReason, clusterv1beta1.ConditionSeverityError, "Account Roles failure: %v", err)
 		return ctrl.Result{}, fmt.Errorf("account Roles: %w", err)
+	}
+
+	if err := r.reconcileOIDC(scope, rt); err != nil {
+		v1beta1conditions.MarkFalse(scope.RosaRoleConfig, expinfrav1.RosaRoleConfigReadyCondition, expinfrav1.RosaRoleConfigReconciliationFailedReason, clusterv1beta1.ConditionSeverityError, "OIDC Config/provider failure: %v", err)
+		return ctrl.Result{}, fmt.Errorf("oicd Config: %w", err)
 	}
 
 	if err := r.reconcileOperatorRoles(scope, rt); err != nil {
@@ -201,10 +196,6 @@ func (r *ROSARoleConfigReconciler) reconcileDelete(scope *scope.RosaRoleConfigSc
 }
 
 func (r *ROSARoleConfigReconciler) reconcileOperatorRoles(scope *scope.RosaRoleConfigScope, rt *rosacli.Runtime) error {
-	if r.operatorRolesReady(scope.RosaRoleConfig.Status.OperatorRolesRef) {
-		return nil
-	}
-
 	prefix := scope.RosaRoleConfig.Spec.OperatorRoleConfig.Prefix
 
 	// Use targeted GetRoleByName lookups instead of ListOperatorRoles. ListOperatorRoles
@@ -260,11 +251,6 @@ func (r *ROSARoleConfigReconciler) lookupOperatorRolesRef(rt *rosacli.Runtime, p
 }
 
 func (r *ROSARoleConfigReconciler) reconcileOIDC(scope *scope.RosaRoleConfigScope, rt *rosacli.Runtime) error {
-	// return if oidc provider already created.
-	if scope.RosaRoleConfig.Status.OIDCID != "" && scope.RosaRoleConfig.Status.OIDCProviderARN != "" {
-		return nil
-	}
-
 	oidcID := ""
 	switch scope.RosaRoleConfig.Spec.OidcProviderType {
 	case expinfrav1.Managed:
@@ -326,10 +312,6 @@ func (r *ROSARoleConfigReconciler) reconcileOIDC(scope *scope.RosaRoleConfigScop
 }
 
 func (r *ROSARoleConfigReconciler) reconcileAccountRoles(scope *scope.RosaRoleConfigScope, rt *rosacli.Runtime) error {
-	if r.accountRolesReady(scope.RosaRoleConfig.Status.AccountRolesRef) {
-		return nil
-	}
-
 	prefix := scope.RosaRoleConfig.Spec.AccountRoleConfig.Prefix
 
 	// Use targeted GetRoleByName lookups instead of ListAccountRoles. ListAccountRoles

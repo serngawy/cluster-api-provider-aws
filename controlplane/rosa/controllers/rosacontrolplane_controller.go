@@ -1359,9 +1359,13 @@ func (r *ROSAControlPlaneReconciler) resolveCreatorForTargetAccount(ctx context.
 		if err := r.Client.Get(ctx, client.ObjectKey{
 			Name:      rosaScope.ControlPlane.Spec.RosaRoleConfigRef.Name,
 			Namespace: rosaScope.ControlPlane.Namespace,
-		}, rosaRoleConfig); err == nil {
-			installerRoleARN = rosaRoleConfig.Status.AccountRolesRef.InstallerRoleARN
+		}, rosaRoleConfig); err != nil {
+			return nil, err
 		}
+		if rosaRoleConfig.Status.AccountRolesRef.InstallerRoleARN == "" {
+			return nil, fmt.Errorf("RosaRoleConfig %s/%s is not ready", rosaScope.ControlPlane.Namespace, rosaScope.ControlPlane.Spec.RosaRoleConfigRef.Name)
+		}
+		installerRoleARN = rosaRoleConfig.Status.AccountRolesRef.InstallerRoleARN
 	}
 
 	if installerRoleARN == "" {
@@ -1380,15 +1384,21 @@ func (r *ROSAControlPlaneReconciler) resolveCreatorForTargetAccount(ctx context.
 	// This yields a real sts:AssumeRole identity whose ARN and AccountID are both in the
 	// target account, satisfying all OCM creator validations.
 	session := rosaScope.Session()
+	// Fall back to the control plane spec region when the session carries no region
+	// (e.g. when the scope is constructed without a full AWS session in tests).
+	if session.Region == "" {
+		session.Region = rosaScope.ControlPlane.Spec.Region
+	}
 	stsSvc := stsv2sdk.NewFromConfig(session)
 	assumeRoleProvider := stscreds.NewAssumeRoleProvider(stsSvc, installerRoleARN, func(o *stscreds.AssumeRoleOptions) {
 		o.RoleSessionName = fmt.Sprintf("%s-%s", "capa-session", rosaScope.ControlPlane.Spec.RosaClusterName)
 	})
 
-	targetSession := awsv2.Config{
-		Region:      session.Region,
-		Credentials: awsv2.NewCredentialsCache(assumeRoleProvider),
-	}
+	rosaScope.Info("Assuming cross-account deployment", "targetAccount", targetAccountID, "installerRoleARN", installerRoleARN)
+
+	// Build targetSession based on old session default values and load the new credential.
+	targetSession := session.Copy()
+	targetSession.Credentials = awsv2.NewCredentialsCache(assumeRoleProvider)
 
 	log := rosaScope.Logger.GetLogger()
 	targetClient, err := rosaaws.NewClient().

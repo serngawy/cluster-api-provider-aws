@@ -684,6 +684,12 @@ func TestROSARoleConfigSetUpRuntimeError(t *testing.T) {
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: rc.Name, Namespace: rc.Namespace}}
 
+	// Wait for the cache to sync the newly created object before reconciling.
+	g.Eventually(func(g Gomega) {
+		got := &expinfrav1.ROSARoleConfig{}
+		g.Expect(testEnv.Client.Get(ctx, req.NamespacedName, got)).To(Succeed())
+	}).WithTimeout(10 * time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
+
 	// First reconciliation: runtimeFactory fails.
 	_, err1 := reconciler.Reconcile(ctx, req)
 	g.Expect(err1).To(HaveOccurred())
@@ -877,27 +883,24 @@ func TestROSARoleConfigReconcileDelete(t *testing.T) {
 	err = reconciler.Client.Delete(ctx, rosaRoleConfig)
 	g.Expect(err).ToNot(HaveOccurred())
 
-	// Sleep to ensure the status is updated
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the cache to reflect the deletion timestamp before reconciling.
+	g.Eventually(func(g Gomega) {
+		got := &expinfrav1.ROSARoleConfig{}
+		g.Expect(testEnv.Client.Get(ctx, req.NamespacedName, got)).To(Succeed())
+		g.Expect(got.DeletionTimestamp).ToNot(BeNil())
+	}).WithTimeout(10 * time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
 
 	_, errReconcile := reconciler.Reconcile(ctx, req)
-
-	// Assertions - deletion should succeed
 	g.Expect(errReconcile).ToNot(HaveOccurred())
 
-	// Sleep to ensure the status is updated
-	time.Sleep(100 * time.Millisecond)
-
-	deletedRoleConfig := &expinfrav1.ROSARoleConfig{}
-
-	// Verify the resource has been deleted (finalizers removed)
-	err = reconciler.Client.Get(ctx, req.NamespacedName, deletedRoleConfig)
-
-	// The object should either be not found (fully deleted) or have no finalizers
-	if err == nil {
-		// If object still exists, verify finalizers are removed
+	// Wait for finalizers to be removed after reconciliation.
+	g.Eventually(func(g Gomega) {
+		deletedRoleConfig := &expinfrav1.ROSARoleConfig{}
+		if err := reconciler.Client.Get(ctx, req.NamespacedName, deletedRoleConfig); err != nil {
+			return // Object fully deleted — desired state.
+		}
 		g.Expect(deletedRoleConfig.Finalizers).To(BeEmpty(), "Finalizers should be removed after successful deletion")
-	}
+	}).WithTimeout(10 * time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
 }
 
 // fakeSTSAssumeRoleResponse returns valid STS AssumeRole XML for the fake STS httptest server.
@@ -1137,6 +1140,12 @@ func TestROSARoleConfigReconcilerWithRoleIdentityNamespaceNotAllowed(t *testing.
 	req := ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: rosaRoleConfig.Name, Namespace: rosaRoleConfig.Namespace},
 	}
+
+	// Wait for the cache to sync all created objects before reconciling.
+	g.Eventually(func(g Gomega) {
+		got := &expinfrav1.ROSARoleConfig{}
+		g.Expect(testEnv.Client.Get(ctx, req.NamespacedName, got)).To(Succeed())
+	}).WithTimeout(10 * time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
 
 	_, errReconcile := reconciler.Reconcile(ctx, req)
 
